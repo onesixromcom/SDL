@@ -235,7 +235,6 @@ static int PS2_QueueDrawPoints(SDL_Renderer *renderer, SDL_RenderCommand *cmd, c
     return 0;
 }
 
-// If STQ coordinates are used set q to 1.0f otherwise keep it as 0.0f
 static inline gs_rgbaq color_to_RGBAQ_tex(uint8_t r, uint8_t g, uint8_t b, uint8_t a, float q)
 {
     uint8_t colorR = (uint8_t)SDL_roundf(SDL_clamp(r * q, 0.0f, 0.5f) * 255.0f);
