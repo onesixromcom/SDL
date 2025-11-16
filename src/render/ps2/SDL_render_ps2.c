@@ -235,6 +235,17 @@ static int PS2_QueueDrawPoints(SDL_Renderer *renderer, SDL_RenderCommand *cmd, c
     return 0;
 }
 
+// If STQ coordinates are used set q to 1.0f otherwise keep it as 0.0f
+static inline gs_rgbaq color_to_RGBAQ_tex(uint8_t r, uint8_t g, uint8_t b, uint8_t a, float q)
+{
+    uint8_t colorR = (uint8_t)SDL_roundf(SDL_clamp(r * q, 0.0f, 0.5f) * 255.0f);
+    uint8_t colorG = (uint8_t)SDL_roundf(SDL_clamp(g * q, 0.0f, 0.5f) * 255.0f);
+    uint8_t colorB = (uint8_t)SDL_roundf(SDL_clamp(b * q, 0.0f, 0.5f) * 255.0f);
+    uint8_t colorA = (uint8_t)SDL_roundf(SDL_clamp(a, 0.0f, 0.5f) * 255.0f);
+
+    return color_to_RGBAQ(colorR, colorG, colorB, colorA, 0x00);
+}
+
 static int PS2_QueueGeometry(SDL_Renderer *renderer, SDL_RenderCommand *cmd, SDL_Texture *texture,
                              const float *xy, int xy_stride, const SDL_Color *color, int color_stride, const float *uv, int uv_stride,
                              int num_vertices, const void *indices, int num_indices, int size_indices,
@@ -275,7 +286,7 @@ static int PS2_QueueGeometry(SDL_Renderer *renderer, SDL_RenderCommand *cmd, SDL
             uv_ = (float *)((char *)uv + j * uv_stride);
 
             vertices->xyz2 = vertex_to_XYZ2(data->gsGlobal, xy_[0] * scale_x, xy_[1] * scale_y, 0);
-            vertices->rgbaq = color_to_RGBAQ(col_.r, col_.g, col_.b, col_.a, 0);
+            vertices->rgbaq = color_to_RGBAQ_tex(col_.r, col_.g, col_.b, col_.a, 1.0f);
             vertices->uv = vertex_to_UV(ps2_tex, uv_[0] * ps2_tex->Width, uv_[1] * ps2_tex->Height);
 
             vertices++;
