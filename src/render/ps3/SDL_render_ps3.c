@@ -25,130 +25,21 @@
 #include "../../video/SDL_sysvideo.h"
 #include "../../video/ps3/SDL_ps3video.h"
 #include "../SDL_sysrender.h"
-#include "./ps3_texture_vpo.h"
-#include "./ps3_texture_fpo.h"
-#include "./ps3_color_vpo.h"
-#include "./ps3_color_fpo.h"
+#include "SDL_render_ps3.h"
+#include "ps3_texture_vpo.h"
+#include "ps3_texture_fpo.h"
+#include "ps3_color_vpo.h"
+#include "ps3_color_fpo.h"
 
-#include <assert.h>
 #include <rsx/commands.h>
 #include <rsx/gcm_sys.h>
 #include <rsx/mm.h>
-#include <rsx/rsx.h>
-#include <sys/systime.h>
 #include <sys/event_queue.h>
-
-#define FRAME_BUFFER_COUNT              2
-#define GCM_PREPARED_BUFFER_INDEX       5
-#define GCM_BUFFER_STATUS_INDEX         66
-#define GCM_WAIT_LABEL_INDEX            255
-
-#define MAX_BUFFER_QUEUE_SIZE           1
-
-#define BUFFER_IDLE                     0
-#define BUFFER_BUSY                     1
-
-// Max sprites to be displayed on the screen.
-#define QUAD_RING_SIZE 1024
-
-typedef struct PS3_DrawStateCache
-{
-    const SDL_Rect *viewport;
-    SDL_Rect cliprect;
-    bool cliprect_enabled_dirty;
-    bool cliprect_enabled;
-    bool cliprect_dirty;
-    SDL_Color color;
-} PS3_DrawStateCache;
-
-typedef struct PS3_CopyData
-{
-    SDL_FRect srcRect;
-    SDL_FRect dstRect;
-} PS3_CopyData;
-
-typedef struct TexVertex
-{
-    float x, y, z;
-    float u, v;
-} TexVertex;
-
-typedef struct ColorVertex
-{
-    float x, y, z;
-    float r, g, b, a;
-} ColorVertex;
-
-typedef struct {
-    TexVertex *vbo;
-    u32 offset;
-} QuadSlot;
-
-typedef struct PS3_TextureData
-{
-    SDL_Surface *surface;
-    gcmTexture   rsx_texture;
-    u32          offset;
-} PS3_TextureData;
-
-typedef struct PS3_RenderData
-{
-    gcmSurface surface;
-    u32 fbOnDisplay;
-    u32 fbFlipped;
-    bool fbOnFlip;
-    u32 curr_fb;
-    sys_event_queue_t flipEventQueue;
-    sys_event_port_t flipEventPort;
-    u32 color_offset[FRAME_BUFFER_COUNT];
-    u32 *color_buffer[FRAME_BUFFER_COUNT];
-
-    u32 color_pitch;
-    u32 depth_offset;
-    u32 depth_pitch;
-    u32 screenw, screenh;
-    gcmContextData *context; // Context to keep track of the RSX buffer
-    PS3_DrawStateCache drawstate;
-
-    // Use quads array to handle drawing of
-    // the same texture multiple times.
-    QuadSlot quad_ring[QUAD_RING_SIZE];
-    u32 quad_ring_index;
-
-    // texture
-    rsxVertexProgram   *vpo;
-    rsxFragmentProgram *fpo;
-    void *vp_ucode;
-    u32   vp_ucode_size;
-    u32 fp_ucode_size;
-    void *fp_ucode_rsx;
-    void *fp_ucode_cpu;
-    u32 fp_offset;
-
-    // color
-    rsxVertexProgram   *vpo_color;
-    rsxFragmentProgram *fpo_color;
-    void *vp_ucode_color;
-    u32   vp_ucode_size_color;
-    u32 fp_ucode_size_color;
-    void *fp_ucode_cpu_color;
-    u32 fp_offset_color;
-    void *fp_ucode_rsx_color;
-
-    f32 ortho_matrix[16];
-} PS3_RenderData;
+#include <sys/systime.h>
 
 static PS3_RenderData *g_ps3_data;
 
-static void PS3_DrawTexturedQuad(PS3_RenderData *data, PS3_TextureData *tdata,
-                           float dstx, float dsty, float dstw, float dsth,
-                           float srcx, float srcy, float srcw, float srch);
-
-static void PS3_DrawColoredPrimitive(PS3_RenderData *data, u8 primitive_type,
-                               ColorVertex *verts, u32 count,
-                               Uint8 r, Uint8 g, Uint8 b, Uint8 a);
-
-void build_ortho_matrix(float *m, float left, float right, float bottom, float top, float near, float far)
+void BuildOrthoMatrix(float *m, float left, float right, float bottom, float top, float near, float far)
 {
     memset(m, 0, sizeof(float) * 16);
     m[0]  = 2.0f / (right - left);
@@ -160,7 +51,8 @@ void build_ortho_matrix(float *m, float left, float right, float bottom, float t
     m[15] = 1.0f;
 }
 
-static void flipHandler(const u32 head)
+
+static void HandlerFlip(const u32 head)
 {
     (void)head;
     u32 v = g_ps3_data->fbFlipped;
@@ -174,7 +66,7 @@ static void flipHandler(const u32 head)
     sysEventPortSend(g_ps3_data->flipEventPort, 0, 0, 0);
 }
 
-static void vblankHandler(const u32 head)
+static void HandlerVBlank(const u32 head)
 {
     (void)head;
     u32 data;
@@ -189,7 +81,7 @@ static void vblankHandler(const u32 head)
         if (bufferToFlip != g_ps3_data->fbOnDisplay) {
             s32 ret = gcmSetFlipImmediate(indexToFlip);
             if (ret != 0) {
-                printf("flip immediate failed\n");
+                // Flip immediate failed.
                 return;
             }
             g_ps3_data->fbFlipped = bufferToFlip;
@@ -1039,8 +931,8 @@ static bool PS3_CreateRenderer(SDL_Renderer *renderer, SDL_Window *window, SDL_P
     sysEventPortCreate(&data->flipEventPort, SYS_EVENT_PORT_LOCAL, SYS_EVENT_PORT_NO_NAME);
     sysEventPortConnectLocal(data->flipEventPort, data->flipEventQueue);
 
-    gcmSetFlipHandler(flipHandler);
-    gcmSetVBlankHandler(vblankHandler);
+    gcmSetFlipHandler(HandlerFlip);
+    gcmSetVBlankHandler(HandlerVBlank);
 
     // Init render target.
     memset(&data->surface, 0, sizeof(gcmSurface));
@@ -1112,7 +1004,7 @@ static bool PS3_CreateRenderer(SDL_Renderer *renderer, SDL_Window *window, SDL_P
     data->quad_ring_index = 0;
 
     // Build matrix for textures
-    build_ortho_matrix(data->ortho_matrix, 0.0f, data->screenw, data->screenh, 0.0f, -1.0f, 1.0f);
+    BuildOrthoMatrix(data->ortho_matrix, 0.0f, data->screenw, data->screenh, 0.0f, -1.0f, 1.0f);
 
     renderer->name = PS3_RenderDriver.name;
     renderer->npot_texture_wrap_unsupported = false;
