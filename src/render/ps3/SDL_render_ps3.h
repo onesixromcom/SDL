@@ -35,6 +35,8 @@
 #define BUFFER_BUSY                     1
 
 // Max sprites to be displayed on the screen.
+// This possible could issue artifacts on the screen
+// when a lot of scprites to be displayed.
 #define QUAD_RING_SIZE 1024
 
 typedef struct PS3_DrawStateCache
@@ -98,7 +100,7 @@ typedef struct PS3_RenderData
     PS3_DrawStateCache drawstate;
 
     // Use quads array to handle drawing of
-    // the same texture multiple times.
+    // the same texture multiple times
     QuadSlot quad_ring[QUAD_RING_SIZE];
     u32 quad_ring_index;
 
